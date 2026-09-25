@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import time
 from typing import Any
 
 from genai.mock_llm import MockLLMClient
@@ -102,6 +102,8 @@ class BusinessIntelligenceAgent:
             arguments,
         )
 
+        tool_start = time.perf_counter()
+
         state.add_trace(
             state.iteration + 1,
             "TOOL_STARTED",
@@ -121,15 +123,30 @@ class BusinessIntelligenceAgent:
             )
 
         except Exception as exc:
+            duration_ms = round(
+                (time.perf_counter() - tool_start) * 1000,
+                2,
+            )
+
             state.add_trace(
                 state.iteration + 1,
                 "TOOL_FAILED",
                 {
                     "tool": tool_name,
+                    "duration_ms": duration_ms,
                     "error": str(exc),
                 },
             )
+
             raise
+
+        # ---------------------------------------------------------
+        # Calculate tool execution time.
+        # ---------------------------------------------------------
+        duration_ms = round(
+            (time.perf_counter() - tool_start) * 1000,
+            2,
+        )
 
         # ---------------------------------------------------------
         # Increase iteration after successful execution.
@@ -149,7 +166,12 @@ class BusinessIntelligenceAgent:
             "TOOL_COMPLETED",
             {
                 "tool": tool_name,
-                "result": result,
+                "duration_ms": duration_ms,
+                "success": (
+                    result.get("success", True)
+                    if isinstance(result, dict)
+                    else True
+                ),
             },
         )
 
@@ -211,12 +233,15 @@ class BusinessIntelligenceAgent:
                     f"Maximum iterations ({self.MAX_ITERATIONS}) reached."
                 )
 
+                state.finish()
+
                 state.add_trace(
                     state.iteration + 1,
                     "MAX_ITERATIONS_REACHED",
                     {
                         "iteration": state.iteration,
                         "max_iterations": self.MAX_ITERATIONS,
+                        "total_duration_ms": state.total_duration_ms,
                     },
                 )
 
@@ -352,11 +377,18 @@ class BusinessIntelligenceAgent:
                 state.status = "failed"
                 state.error = str(exc)
 
+                # -------------------------------------------------
+                # Mark failed execution as finished so that
+                # total duration is available for observability.
+                # -------------------------------------------------
+                state.finish()
+
                 state.add_trace(
                     state.iteration,
                     "EXECUTION_FAILED",
                     {
                         "error": str(exc),
+                        "total_duration_ms": state.total_duration_ms,
                     },
                 )
 
@@ -366,17 +398,19 @@ class BusinessIntelligenceAgent:
         # 5. Validate iteration limit.
         # ---------------------------------------------------------
         if state.iteration > self.MAX_ITERATIONS:
-            state.status = "max_iterations"
+            state.status = "failed"
             state.error = (
                 f"Maximum iterations ({self.MAX_ITERATIONS}) reached."
             )
+
+            state.finish()
 
             state.add_trace(
                 state.iteration,
                 "MAX_ITERATIONS_REACHED",
                 {
-                    "iteration": state.iteration,
                     "max_iterations": self.MAX_ITERATIONS,
+                    "total_duration_ms": state.total_duration_ms,
                 },
             )
 
@@ -385,8 +419,6 @@ class BusinessIntelligenceAgent:
         # ---------------------------------------------------------
         # 6. Generate final answer.
         # ---------------------------------------------------------
-        state.status = "completed"
-
         state.final_answer = self.synthesizer.synthesize(
             question=question,
             intent=state.intent,
@@ -401,12 +433,20 @@ class BusinessIntelligenceAgent:
             },
         )
 
+        # ---------------------------------------------------------
+        # 7. Mark execution as completed.
+        # ---------------------------------------------------------
+        state.status = "completed"
+
+        state.finish()
+
         state.add_trace(
             state.iteration,
             "EXECUTION_COMPLETED",
             {
                 "status": state.status,
                 "iterations": state.iteration,
+                "total_duration_ms": state.total_duration_ms,
             },
         )
 
