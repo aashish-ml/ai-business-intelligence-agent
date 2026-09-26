@@ -5,6 +5,7 @@ FastAPI application for the AI Business Intelligence Agent.
 from fastapi import FastAPI
 
 from api.routes.agent import router as agent_router
+from api.routes.dashboard import router as dashboard_router
 
 
 app = FastAPI(
@@ -18,12 +19,9 @@ app = FastAPI(
 )
 
 
-@app.get(
-    "/health",
-    tags=["Health"],
-)
+@app.get("/health", tags=["Health"])
 def health_check() -> dict[str, str]:
-    """Return API health status."""
+    """Health check endpoint."""
 
     return {
         "status": "healthy",
@@ -31,6 +29,5 @@ def health_check() -> dict[str, str]:
     }
 
 
-app.include_router(
-    agent_router
-)
+app.include_router(agent_router)
+app.include_router(dashboard_router)
