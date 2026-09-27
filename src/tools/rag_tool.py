@@ -1,3 +1,10 @@
+"""
+Agent-facing Retrieval-Augmented Generation (RAG) tool.
+
+Provides semantic search over the business knowledge base and exposes
+a module-level interface for the central ToolRouter.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,7 +13,7 @@ from src.retrieval.retriever import SemanticRetriever
 
 
 class RAGToolError(RuntimeError):
-    pass
+    """Raised when a RAG tool operation fails."""
 
 
 class RAGTool:
@@ -20,7 +27,7 @@ class RAGTool:
     def __init__(
         self,
         retriever: SemanticRetriever | None = None,
-    ):
+    ) -> None:
         self.retriever = (
             retriever
             if retriever is not None
@@ -32,6 +39,9 @@ class RAGTool:
         query: str,
         top_k: int = 5,
     ) -> dict[str, Any]:
+        """
+        Search the business knowledge base.
+        """
 
         if not query or not query.strip():
             raise RAGToolError(
@@ -53,20 +63,14 @@ class RAGTool:
                 f"RAG search failed: {exc}"
             ) from exc
 
-        evidence = []
+        evidence: list[dict[str, Any]] = []
 
         for result in results:
             evidence.append(
                 {
-                    "document_id": result[
-                        "document_id"
-                    ],
-                    "filename": result[
-                        "filename"
-                    ],
-                    "section": result[
-                        "section"
-                    ],
+                    "document_id": result["document_id"],
+                    "filename": result["filename"],
+                    "section": result["section"],
                     "score": round(
                         result["score"],
                         4,
@@ -83,10 +87,35 @@ class RAGTool:
         }
 
 
-if __name__ == "__main__":
-    tool = RAGTool()
+# ============================================================
+# Module-Level Tool Interface
+# ============================================================
 
-    result = tool.search(
+_default_rag_tool = RAGTool()
+
+
+def rag_search(
+    query: str,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """
+    Search the business knowledge base.
+
+    This is the module-level interface used by ToolRouter.
+    """
+
+    return _default_rag_tool.search(
+        query=query,
+        top_k=top_k,
+    )
+
+
+# ============================================================
+# Standalone Test
+# ============================================================
+
+if __name__ == "__main__":
+    result = rag_search(
         "What should we do with high-risk customers?"
     )
 

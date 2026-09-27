@@ -1,20 +1,26 @@
 from __future__ import annotations
+
 import time
 from typing import Any
 
 from genai.mock_llm import MockLLMClient
+from genai.synthesis import AnswerSynthesizer
+
 from src.agent.planner import BusinessPlanner
 from src.agent.router import ToolRouter
 from src.agent.state import AgentState
+
 from src.tools.analysis_tool import group_and_aggregate
+from src.tools.business_analysis_tool import analyze_business_metric
 from src.tools.calculator_tool import percentage_change
-from src.tools.sql_tool import execute_sql_query
-from genai.synthesis import AnswerSynthesizer
 from src.tools.ml_tool import MLModelTool
 from src.tools.rag_tool import RAGTool
+from src.tools.sql_tool import execute_sql_query
 
 
 class BusinessIntelligenceAgent:
+    """Production-oriented business intelligence agent."""
+
     MAX_ITERATIONS = 5
 
     def __init__(self) -> None:
@@ -22,6 +28,7 @@ class BusinessIntelligenceAgent:
         self.planner = BusinessPlanner()
         self.llm = MockLLMClient()
         self.synthesizer = AnswerSynthesizer()
+
         self.ml_tool = MLModelTool()
         self.rag_tool = RAGTool()
 
@@ -46,12 +53,40 @@ class BusinessIntelligenceAgent:
         self._register_tools()
 
     def _register_tools(self) -> None:
+        """Register all approved agent tools."""
+
+        # ---------------------------------------------------------
+        # Business analysis
+        # ---------------------------------------------------------
+        self.router.register(
+            "business_analysis",
+            (
+                "Perform deterministic business analysis such as "
+                "revenue change, revenue trends, category performance, "
+                "top products, segment performance, and order status."
+            ),
+            analyze_business_metric,
+        )
+
+        # ---------------------------------------------------------
+        # Safe SQL
+        # ---------------------------------------------------------
+        self.router.register(
+            "execute_sql",
+            "Execute a safe read-only SQL query.",
+            execute_sql_query,
+        )
+
+        # Backward-compatible alias for existing flows/tests.
         self.router.register(
             "sql_query",
             "Execute a safe read-only SQL query.",
             execute_sql_query,
         )
 
+        # ---------------------------------------------------------
+        # Calculation tools
+        # ---------------------------------------------------------
         self.router.register(
             "percentage_change",
             "Calculate percentage change between two values.",
@@ -65,6 +100,8 @@ class BusinessIntelligenceAgent:
         )
 
     def create_state(self, question: str) -> AgentState:
+        """Create a new agent execution state."""
+
         if not question or not question.strip():
             raise ValueError("Question cannot be empty.")
 
@@ -78,7 +115,7 @@ class BusinessIntelligenceAgent:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> Any:
-        """Execute a registered tool and record its trace."""
+        """Execute a registered tool and record observability data."""
 
         if state.iteration >= self.MAX_ITERATIONS:
             state.add_trace(
@@ -91,12 +128,10 @@ class BusinessIntelligenceAgent:
             )
 
             raise RuntimeError(
-                f"Maximum agent iterations ({self.MAX_ITERATIONS}) exceeded."
+                f"Maximum agent iterations "
+                f"({self.MAX_ITERATIONS}) exceeded."
             )
 
-        # ---------------------------------------------------------
-        # Record tool call.
-        # ---------------------------------------------------------
         state.add_tool_call(
             tool_name,
             arguments,
@@ -113,9 +148,6 @@ class BusinessIntelligenceAgent:
             },
         )
 
-        # ---------------------------------------------------------
-        # Execute tool.
-        # ---------------------------------------------------------
         try:
             result = self.router.execute(
                 tool_name,
@@ -140,22 +172,13 @@ class BusinessIntelligenceAgent:
 
             raise
 
-        # ---------------------------------------------------------
-        # Calculate tool execution time.
-        # ---------------------------------------------------------
         duration_ms = round(
             (time.perf_counter() - tool_start) * 1000,
             2,
         )
 
-        # ---------------------------------------------------------
-        # Increase iteration after successful execution.
-        # ---------------------------------------------------------
         state.iteration += 1
 
-        # ---------------------------------------------------------
-        # Store observation.
-        # ---------------------------------------------------------
         state.add_observation(
             tool_name,
             result,
@@ -179,75 +202,81 @@ class BusinessIntelligenceAgent:
 
     def run(self, question: str) -> AgentState:
         """
-        Run the business intelligence agent.
+        Run the complete business intelligence agent.
 
         Workflow:
+
         Question
             ↓
         Planner
             ↓
+        Tool Selection
+            ↓
         Tool Execution
             ↓
-        Observation
-            ↓
         Evidence
+            ↓
+        Synthesis
             ↓
         Final Answer
         """
 
         state = self.create_state(question)
 
-        # ---------------------------------------------------------
-        # 1. Generate structured plan.
-        # ---------------------------------------------------------
-        plan = self.llm.create_plan(question)
+        try:
+            # -----------------------------------------------------
+            # 1. Generate structured plan.
+            # -----------------------------------------------------
+            plan = self.llm.create_plan(question)
 
-        state.intent = plan.intent
+            state.intent = plan.intent
 
-        state.plan = [
-            {
-                "tool": call.tool,
-                "arguments": call.arguments,
-                "purpose": call.purpose,
-            }
-            for call in plan.tool_calls
-        ]
+            state.plan = [
+                {
+                    "tool": call.tool,
+                    "arguments": call.arguments,
+                    "purpose": call.purpose,
+                }
+                for call in plan.tool_calls
+            ]
 
-        state.add_trace(
-            0,
-            "PLAN_CREATED",
-            {
-                "intent": state.intent,
-                "plan": state.plan,
-            },
-        )
+            state.add_trace(
+                0,
+                "PLAN_CREATED",
+                {
+                    "intent": state.intent,
+                    "plan": state.plan,
+                },
+            )
 
-        # ---------------------------------------------------------
-        # 2. Execute planned tools.
-        # ---------------------------------------------------------
-        for tool_call in plan.tool_calls:
+            # -----------------------------------------------------
+            # 2. Execute planned tools.
+            # -----------------------------------------------------
+            for tool_call in plan.tool_calls:
 
-            if state.iteration >= self.MAX_ITERATIONS:
-                state.status = "max_iterations"
-                state.error = (
-                    f"Maximum iterations ({self.MAX_ITERATIONS}) reached."
-                )
+                if state.iteration >= self.MAX_ITERATIONS:
+                    state.status = "max_iterations"
+                    state.error = (
+                        f"Maximum iterations "
+                        f"({self.MAX_ITERATIONS}) reached."
+                    )
 
-                state.finish()
+                    state.finish()
 
-                state.add_trace(
-                    state.iteration + 1,
-                    "MAX_ITERATIONS_REACHED",
-                    {
-                        "iteration": state.iteration,
-                        "max_iterations": self.MAX_ITERATIONS,
-                        "total_duration_ms": state.total_duration_ms,
-                    },
-                )
+                    state.add_trace(
+                        state.iteration + 1,
+                        "MAX_ITERATIONS_REACHED",
+                        {
+                            "iteration": state.iteration,
+                            "max_iterations": self.MAX_ITERATIONS,
+                            "total_duration_ms": (
+                                state.total_duration_ms
+                            ),
+                        },
+                    )
 
-                return state
+                    return state
 
-            try:
                 result = self.execute_tool(
                     state,
                     tool_call.tool,
@@ -274,7 +303,7 @@ class BusinessIntelligenceAgent:
                 )
 
                 # -------------------------------------------------
-                # 3. Multi-step revenue analysis.
+                # Multi-step revenue analysis.
                 # -------------------------------------------------
                 if (
                     state.intent == "business_analysis"
@@ -323,7 +352,7 @@ class BusinessIntelligenceAgent:
                         )
 
                 # -------------------------------------------------
-                # 4. Multi-step customer risk → policy workflow.
+                # Multi-step customer risk → policy workflow.
                 # -------------------------------------------------
                 if (
                     state.intent == "customer_risk_policy"
@@ -373,81 +402,84 @@ class BusinessIntelligenceAgent:
                             },
                         )
 
-            except Exception as exc:
+            # -----------------------------------------------------
+            # 3. Validate iteration limit.
+            # -----------------------------------------------------
+            if state.iteration > self.MAX_ITERATIONS:
                 state.status = "failed"
-                state.error = str(exc)
+                state.error = (
+                    f"Maximum iterations "
+                    f"({self.MAX_ITERATIONS}) reached."
+                )
 
-                # -------------------------------------------------
-                # Mark failed execution as finished so that
-                # total duration is available for observability.
-                # -------------------------------------------------
                 state.finish()
 
                 state.add_trace(
                     state.iteration,
-                    "EXECUTION_FAILED",
+                    "MAX_ITERATIONS_REACHED",
                     {
-                        "error": str(exc),
-                        "total_duration_ms": state.total_duration_ms,
+                        "max_iterations": self.MAX_ITERATIONS,
+                        "total_duration_ms": (
+                            state.total_duration_ms
+                        ),
                     },
                 )
 
                 return state
 
-        # ---------------------------------------------------------
-        # 5. Validate iteration limit.
-        # ---------------------------------------------------------
-        if state.iteration > self.MAX_ITERATIONS:
-            state.status = "failed"
-            state.error = (
-                f"Maximum iterations ({self.MAX_ITERATIONS}) reached."
+            # -----------------------------------------------------
+            # 4. Generate final answer.
+            # -----------------------------------------------------
+            state.final_answer = self.synthesizer.synthesize(
+                question=question,
+                intent=state.intent,
+                evidence=state.evidence,
             )
+
+            state.add_trace(
+                state.iteration,
+                "FINAL_ANSWER_GENERATED",
+                {
+                    "answer": state.final_answer,
+                },
+            )
+
+            # -----------------------------------------------------
+            # 5. Mark successful execution.
+            # -----------------------------------------------------
+            state.status = "completed"
 
             state.finish()
 
             state.add_trace(
                 state.iteration,
-                "MAX_ITERATIONS_REACHED",
+                "EXECUTION_COMPLETED",
                 {
-                    "max_iterations": self.MAX_ITERATIONS,
-                    "total_duration_ms": state.total_duration_ms,
+                    "status": state.status,
+                    "iterations": state.iteration,
+                    "total_duration_ms": (
+                        state.total_duration_ms
+                    ),
                 },
             )
 
             return state
 
-        # ---------------------------------------------------------
-        # 6. Generate final answer.
-        # ---------------------------------------------------------
-        state.final_answer = self.synthesizer.synthesize(
-            question=question,
-            intent=state.intent,
-            evidence=state.evidence,
-        )
+        except Exception as exc:
+            state.status = "failed"
+            state.error = str(exc)
 
-        state.add_trace(
-            state.iteration,
-            "FINAL_ANSWER_GENERATED",
-            {
-                "answer": state.final_answer,
-            },
-        )
+            state.finish()
 
-        # ---------------------------------------------------------
-        # 7. Mark execution as completed.
-        # ---------------------------------------------------------
-        state.status = "completed"
+            state.add_trace(
+                state.iteration,
+                "EXECUTION_FAILED",
+                {
+                    "error": str(exc),
+                    "total_duration_ms": (
+                        state.total_duration_ms
+                    ),
+                },
+            )
 
-        state.finish()
-
-        state.add_trace(
-            state.iteration,
-            "EXECUTION_COMPLETED",
-            {
-                "status": state.status,
-                "iterations": state.iteration,
-                "total_duration_ms": state.total_duration_ms,
-            },
-        )
-
-        return state
+            return state

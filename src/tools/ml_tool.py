@@ -1,16 +1,23 @@
+"""
+Machine Learning tools for the AI Business Intelligence Agent.
+
+Provides customer risk prediction using the trained ML model artifact.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+
+import joblib
+import pandas as pd
 from sqlalchemy import text
 
 from src.data.database import get_engine
-import joblib
-import pandas as pd
 
 
 class MLToolError(RuntimeError):
-    pass
+    """Raised when an ML tool operation fails."""
 
 
 REQUIRED_FEATURES = [
@@ -27,16 +34,16 @@ REQUIRED_FEATURES = [
 
 
 class MLModelTool:
+    """Customer risk prediction model wrapper."""
+
     def __init__(
         self,
         model_path: str | None = None,
-    ):
+    ) -> None:
         self.model_path = (
             Path(model_path)
             if model_path
-            else Path(
-                "models/business_model.joblib"
-            )
+            else Path("models/business_model.joblib")
         )
 
         self.model: Any | None = None
@@ -46,6 +53,7 @@ class MLModelTool:
         self,
         customer_id: int,
     ) -> dict[str, Any]:
+        """Build ML features for a customer from the database."""
 
         query = text(
             """
@@ -202,9 +210,7 @@ class MLModelTool:
         with engine.connect() as connection:
             row = connection.execute(
                 query,
-                {
-                    "customer_id": customer_id
-                },
+                {"customer_id": customer_id},
             ).mappings().first()
 
         if row is None:
@@ -212,14 +218,14 @@ class MLModelTool:
                 f"Customer not found: {customer_id}"
             )
 
-        features = {
+        return {
             feature: float(row[feature])
             for feature in REQUIRED_FEATURES
         }
 
-        return features
-    
     def load_model(self) -> None:
+        """Load the trained ML model artifact."""
+
         if not self.model_path.exists():
             raise MLToolError(
                 "ML model artifact not found: "
@@ -227,9 +233,7 @@ class MLModelTool:
             )
 
         try:
-            self.model = joblib.load(
-                self.model_path
-            )
+            self.model = joblib.load(self.model_path)
         except Exception as exc:
             raise MLToolError(
                 f"Failed to load ML model: {exc}"
@@ -241,6 +245,7 @@ class MLModelTool:
         self,
         features: dict[str, Any],
     ) -> None:
+        """Validate model input features."""
 
         if not features:
             raise MLToolError(
@@ -264,10 +269,7 @@ class MLModelTool:
         for feature in REQUIRED_FEATURES:
             try:
                 float(features[feature])
-            except (
-                TypeError,
-                ValueError,
-            ):
+            except (TypeError, ValueError):
                 invalid.append(feature)
 
         if invalid:
@@ -280,10 +282,9 @@ class MLModelTool:
         self,
         features: dict[str, Any],
     ) -> dict[str, Any]:
+        """Generate a risk prediction from customer features."""
 
-        self._validate_features(
-            features
-        )
+        self._validate_features(features)
 
         if not self.loaded:
             self.load_model()
@@ -297,18 +298,14 @@ class MLModelTool:
             input_data = pd.DataFrame(
                 [
                     {
-                        feature: float(
-                            features[feature]
-                        )
+                        feature: float(features[feature])
                         for feature in REQUIRED_FEATURES
                     }
                 ]
             )
 
-            probabilities = (
-                self.model.predict_proba(
-                    input_data
-                )
+            probabilities = self.model.predict_proba(
+                input_data
             )
 
             risk_probability = float(
@@ -324,12 +321,9 @@ class MLModelTool:
             )
 
             prediction = int(
-                risk_probability
-                >= decision_threshold
+                risk_probability >= decision_threshold
             )
 
-            # Risk bands are deliberately separate
-            # from the binary decision threshold.
             if risk_probability >= 0.60:
                 risk_level = "high"
             elif risk_probability >= 0.35:
@@ -373,6 +367,7 @@ class MLModelTool:
         self,
         customer_id: int,
     ) -> dict[str, Any]:
+        """Generate a customer-specific risk prediction."""
 
         if customer_id <= 0:
             raise MLToolError(
@@ -383,41 +378,15 @@ class MLModelTool:
             customer_id
         )
 
-        prediction = self.predict(
-            features
-        )
+        prediction = self.predict(features)
 
         prediction["customer_id"] = customer_id
         prediction["features"] = features
 
         return prediction
 
-    def predict_customer(
-        self,
-        customer_id: int,
-    ) -> dict[str, Any]:
-
-        if customer_id <= 0:
-            raise MLToolError(
-                "Customer ID must be positive."
-            )
-
-        features = self.build_customer_features(
-            customer_id
-        )
-
-        prediction = self.predict(
-            features
-        )
-
-        prediction["customer_id"] = customer_id
-        prediction["features"] = features
-
-        return prediction
-
-    def status(
-        self,
-    ) -> dict[str, Any]:
+    def status(self) -> dict[str, Any]:
+        """Return ML model status information."""
 
         return {
             "model_path": str(
@@ -425,7 +394,39 @@ class MLModelTool:
             ),
             "exists": self.model_path.exists(),
             "loaded": self.loaded,
-            "required_features": (
-                REQUIRED_FEATURES.copy()
-            ),
+            "required_features": REQUIRED_FEATURES.copy(),
         }
+
+
+# ============================================================
+# Module-Level Tool Interfaces
+# ============================================================
+
+_default_ml_tool = MLModelTool()
+
+
+def ml_prediction(
+    features: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Predict customer risk from prepared ML features.
+
+    This function is the generic ML tool interface used by ToolRouter.
+    """
+
+    return _default_ml_tool.predict(features)
+
+
+def customer_risk_prediction(
+    customer_id: int,
+) -> dict[str, Any]:
+    """
+    Predict customer risk directly from customer ID.
+
+    Builds the customer's features from the database and then
+    runs the trained ML model.
+    """
+
+    return _default_ml_tool.predict_customer(
+        customer_id
+    )
