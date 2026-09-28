@@ -14,22 +14,25 @@ class MockLLMClient:
     """
 
     def create_plan(
-    self,
-    question: str,
-    context: str = "",
-) -> AgentPlan:
+        self,
+        question: str,
+        context: str = "",
+    ) -> AgentPlan:
         """Create a deterministic execution plan from a user question."""
 
         if not question or not question.strip():
             raise ValueError("Question cannot be empty.")
 
         q = question.lower().strip()
+        normalized_context = (context or "").lower()
+
+        # =========================================================
+        # Memory-Aware Follow-Up Handling
+        # =========================================================
 
         # ---------------------------------------------------------
-        # Memory-aware revenue follow-up handling.
-        # This MUST run before generic/fallback planning.
+        # Previous month / previous period revenue follow-up.
         # ---------------------------------------------------------
-        normalized_context = (context or "").lower()
 
         previous_period_phrases = (
             "previous month",
@@ -78,6 +81,72 @@ class MockLLMClient:
                 ],
             )
 
+        # ---------------------------------------------------------
+        # Memory-aware category follow-up.
+        # ---------------------------------------------------------
+
+        category_follow_up_phrases = (
+            "which category",
+            "what category",
+            "category contributed",
+            "category drove",
+            "category driver",
+            "which segment",
+        )
+
+        is_category_follow_up = any(
+            phrase in q
+            for phrase in category_follow_up_phrases
+        )
+
+        has_revenue_memory = (
+            "revenue" in normalized_context
+            or "business_revenue_analysis"
+            in normalized_context
+            or "business_revenue_trend"
+            in normalized_context
+            or "revenue increased"
+            in normalized_context
+            or "revenue decreased"
+            in normalized_context
+        )
+
+        if (
+            is_category_follow_up
+            and has_revenue_memory
+        ):
+            return AgentPlan(
+                intent="business_decision_analysis",
+                reasoning=(
+                    "The question is a category-level follow-up "
+                    "to the previous revenue discussion. "
+                    "Use revenue and category analysis together."
+                ),
+                tool_calls=[
+                    ToolCall(
+                        tool="business_analysis",
+                        arguments={
+                            "metric": "revenue_change",
+                        },
+                        purpose=(
+                            "Retrieve the revenue change discussed "
+                            "in the previous conversation."
+                        ),
+                    ),
+                    ToolCall(
+                        tool="business_analysis",
+                        arguments={
+                            "metric": "category_performance",
+                        },
+                        purpose=(
+                            "Identify category-level revenue "
+                            "performance and the highest contributing "
+                            "category."
+                        ),
+                    ),
+                ],
+            )
+
         # =========================================================
         # Customer Risk + Policy Multi-Step Workflow
         # =========================================================
@@ -96,20 +165,32 @@ class MockLLMClient:
                 or "action" in q
             )
         ):
-            match = re.search(r"customer\s*(?:id\s*)?(\d+)", q)
+            match = re.search(
+                r"customer\s*(?:id\s*)?(\d+)",
+                q,
+            )
 
             if not match:
                 return AgentPlan(
-        intent="knowledge_search",
-        reasoning="The question asks for general high-risk customer policy guidance.",
-        tool_calls=[
-            ToolCall(
-                tool="rag_search",
-                arguments={"query": q, "top_k": 5},
-                purpose="Retrieve the relevant customer risk policy.",
-            )
-        ],
-    )
+                    intent="knowledge_search",
+                    reasoning=(
+                        "The question asks for general high-risk "
+                        "customer policy guidance."
+                    ),
+                    tool_calls=[
+                        ToolCall(
+                            tool="rag_search",
+                            arguments={
+                                "query": q,
+                                "top_k": 5,
+                            },
+                            purpose=(
+                                "Retrieve the relevant customer "
+                                "risk policy."
+                            ),
+                        )
+                    ],
+                )
 
             customer_id = int(match.group(1))
 
@@ -160,7 +241,10 @@ class MockLLMClient:
             )
         ):
 
-            # Multi-step business decision analysis.
+            # -----------------------------------------------------
+            # Direct multi-step business decision analysis.
+            # -----------------------------------------------------
+
             if (
                 "revenue" in q
                 and (
@@ -180,15 +264,16 @@ class MockLLMClient:
                 return AgentPlan(
                     intent="business_decision_analysis",
                     reasoning=(
-                        "The question requires multiple analytical steps: "
-                        "first determine the revenue change, then identify "
-                        "the category contributing the most revenue."
+                        "The question requires multiple analytical "
+                        "steps: first determine the revenue change, "
+                        "then identify the category contributing "
+                        "the most revenue."
                     ),
                     tool_calls=[
                         ToolCall(
                             tool="business_analysis",
                             arguments={
-                                "metric": "revenue_change"
+                                "metric": "revenue_change",
                             },
                             purpose=(
                                 "Determine the current revenue change "
@@ -198,15 +283,17 @@ class MockLLMClient:
                         ToolCall(
                             tool="business_analysis",
                             arguments={
-                                "metric": "category_performance"
+                                "metric": "category_performance",
                             },
                             purpose=(
-                                "Identify category-level revenue performance "
-                                "and determine the highest contributing category."
+                                "Identify category-level revenue "
+                                "performance and determine the "
+                                "highest contributing category."
                             ),
                         ),
                     ],
                 )
+
             return AgentPlan(
                 intent="business_revenue_analysis",
                 reasoning=(
@@ -232,16 +319,19 @@ class MockLLMClient:
         # =========================================================
 
         if (
-            "monthly" in q
-            and (
-                "sales" in q
-                or "revenue" in q
+            (
+                "monthly" in q
+                and (
+                    "sales" in q
+                    or "revenue" in q
+                )
             )
-        ) or (
-            "revenue trend" in q
-            or "sales trend" in q
-            or "revenue by month" in q
-            or "sales by month" in q
+            or (
+                "revenue trend" in q
+                or "sales trend" in q
+                or "revenue by month" in q
+                or "sales by month" in q
+            )
         ):
             return AgentPlan(
                 intent="business_revenue_trend",
@@ -268,13 +358,16 @@ class MockLLMClient:
         # =========================================================
 
         if (
-            "category" in q
-            or "categories" in q
-        ) and (
-            "revenue" in q
-            or "sales" in q
-            or "performance" in q
-            or "performing" in q
+            (
+                "category" in q
+                or "categories" in q
+            )
+            and (
+                "revenue" in q
+                or "sales" in q
+                or "performance" in q
+                or "performing" in q
+            )
         ):
             return AgentPlan(
                 intent="category_performance",
@@ -339,12 +432,12 @@ class MockLLMClient:
             or "poor performing" in q
             or "lowest performing" in q
         ):
-
             return AgentPlan(
                 intent="product_analysis",
                 reasoning=(
-                    "The question requires product-level profitability "
-                    "analysis to identify underperforming products."
+                    "The question requires product-level "
+                    "profitability analysis to identify "
+                    "underperforming products."
                 ),
                 tool_calls=[
                     ToolCall(
@@ -397,14 +490,17 @@ class MockLLMClient:
         # =========================================================
 
         if (
-            "segment" in q
-            or "customer segment" in q
-            or "segments" in q
-        ) and (
-            "revenue" in q
-            or "sales" in q
-            or "performance" in q
-            or "customers" in q
+            (
+                "segment" in q
+                or "customer segment" in q
+                or "segments" in q
+            )
+            and (
+                "revenue" in q
+                or "sales" in q
+                or "performance" in q
+                or "customers" in q
+            )
         ):
             return AgentPlan(
                 intent="segment_performance",
@@ -507,7 +603,7 @@ class MockLLMClient:
 
         if any(
             phrase in q
-            for phrase in [
+            for phrase in (
                 "policy",
                 "what should we do",
                 "what does the policy",
@@ -517,7 +613,7 @@ class MockLLMClient:
                 "discount policy",
                 "risk management",
                 "sales escalation",
-            ]
+            )
         ):
             return AgentPlan(
                 intent="knowledge_search",
@@ -636,5 +732,3 @@ class MockLLMClient:
             ),
             tool_calls=[],
         )
-
-    

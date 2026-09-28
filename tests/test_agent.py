@@ -342,3 +342,42 @@ def test_agent_uses_memory_for_previous_month_follow_up():
 
     assert "2025-11" in second_state.final_answer
     assert "16,357,450.38" in second_state.final_answer    
+
+def test_agent_uses_memory_for_multi_step_category_follow_up():
+    """Memory should enable multi-step category follow-up reasoning."""
+
+    agent = BusinessIntelligenceAgent()
+
+    first_state = agent.run(
+        "Why did revenue change this month?"
+    )
+
+    assert first_state.status == "completed"
+    assert len(agent.memory) == 1
+
+    second_state = agent.run(
+        "Which category contributed most to that change?"
+    )
+
+    assert second_state.status == "completed"
+    assert len(agent.memory) == 2
+
+    assert second_state.intent == (
+        "business_decision_analysis"
+    )
+
+    assert second_state.iteration == 2
+
+    assert len(second_state.evidence) == 2
+
+    evidence_sources = [
+        item["source"]
+        for item in second_state.evidence
+    ]
+
+    assert evidence_sources.count(
+        "business_analysis"
+    ) == 2
+
+    assert "7.37%" in second_state.final_answer
+    assert "Beauty" in second_state.final_answer    
