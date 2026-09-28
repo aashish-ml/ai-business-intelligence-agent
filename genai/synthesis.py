@@ -776,7 +776,6 @@ class AnswerSynthesizer:
     # =============================================================
 
     @staticmethod
-    @staticmethod
     def _get_business_rows(
         evidence: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
