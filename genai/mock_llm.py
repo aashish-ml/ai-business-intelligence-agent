@@ -25,6 +25,59 @@ class MockLLMClient:
 
         q = question.lower().strip()
 
+        # ---------------------------------------------------------
+        # Memory-aware revenue follow-up handling.
+        # This MUST run before generic/fallback planning.
+        # ---------------------------------------------------------
+        normalized_context = (context or "").lower()
+
+        previous_period_phrases = (
+            "previous month",
+            "last month",
+            "prior month",
+            "previous period",
+            "last period",
+            "prior period",
+        )
+
+        is_previous_period_follow_up = any(
+            phrase in q
+            for phrase in previous_period_phrases
+        )
+
+        has_revenue_context = (
+            "revenue" in normalized_context
+            or "business_revenue_analysis"
+            in normalized_context
+            or "business_revenue_trend"
+            in normalized_context
+        )
+
+        if (
+            is_previous_period_follow_up
+            and has_revenue_context
+        ):
+            return AgentPlan(
+                intent="business_revenue_trend",
+                reasoning=(
+                    "The current question is a revenue-related "
+                    "follow-up referring to a previous period. "
+                    "Use the previous conversation context."
+                ),
+                tool_calls=[
+                    ToolCall(
+                        tool="business_analysis",
+                        arguments={
+                            "metric": "revenue_trend",
+                        },
+                        purpose=(
+                            "Retrieve historical revenue data "
+                            "for the previous period."
+                        ),
+                    )
+                ],
+            )
+
         # =========================================================
         # Customer Risk + Policy Multi-Step Workflow
         # =========================================================
@@ -583,3 +636,5 @@ class MockLLMClient:
             ),
             tool_calls=[],
         )
+
+    

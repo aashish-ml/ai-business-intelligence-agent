@@ -313,3 +313,32 @@ def test_agent_passes_memory_context_to_planner():
 
     assert plan_created["data"]["memory_context_used"] is True
     assert plan_created["data"]["memory_turns"] == 1
+
+def test_agent_uses_memory_for_previous_month_follow_up():
+    """Follow-up questions should use previous conversation context."""
+
+    agent = BusinessIntelligenceAgent()
+
+    first_state = agent.run(
+        "Why did revenue change this month?"
+    )
+
+    assert first_state.status == "completed"
+    assert len(agent.memory) == 1
+
+    second_state = agent.run(
+        "What about the previous month?"
+    )
+
+    assert second_state.status == "completed"
+    assert len(agent.memory) == 2
+
+    assert second_state.intent == "business_revenue_trend"
+
+    assert any(
+        observation["tool"] == "business_analysis"
+        for observation in second_state.observations
+    )
+
+    assert "2025-11" in second_state.final_answer
+    assert "16,357,450.38" in second_state.final_answer    

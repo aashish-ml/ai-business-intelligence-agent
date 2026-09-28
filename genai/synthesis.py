@@ -271,19 +271,112 @@ class AnswerSynthesizer:
 
             if rows:
 
+                # -------------------------------------------------
+                # Memory-aware previous-month revenue follow-up.
+                # -------------------------------------------------
+                normalized_question = (
+                    question.strip().lower()
+                )
+
+                previous_month_requested = any(
+                    phrase in normalized_question
+                    for phrase in (
+                        "previous month",
+                        "last month",
+                        "prior month",
+                    )
+                )
+
+                if (
+                    previous_month_requested
+                    and len(rows) >= 2
+                ):
+                    previous_row = rows[-2]
+
+                    previous_month = (
+                        previous_row.get("month")
+                        or previous_row.get("date")
+                        or previous_row.get("period")
+                    )
+
+                    previous_revenue = (
+                        previous_row.get("revenue")
+                    )
+
+                    if (
+                        previous_month is not None
+                        and previous_revenue is not None
+                    ):
+                        if isinstance(
+                            previous_revenue,
+                            str,
+                        ):
+                            previous_revenue = (
+                                previous_revenue
+                                .replace("₹", "")
+                                .replace(",", "")
+                                .strip()
+                            )
+
+                        return (
+                            f"The previous month was "
+                            f"{previous_month}, with revenue of "
+                            f"₹{float(previous_revenue):,.2f}."
+                        )
+
+                # -------------------------------------------------
+                # Standard revenue trend response.
+                # -------------------------------------------------
                 first = rows[0]
                 last = rows[-1]
+
+                first_month = (
+                    first.get("month")
+                    or first.get("date")
+                    or first.get("period")
+                )
+
+                last_month = (
+                    last.get("month")
+                    or last.get("date")
+                    or last.get("period")
+                )
+
+                first_revenue = first.get(
+                    "revenue",
+                    0,
+                )
+
+                last_revenue = last.get(
+                    "revenue",
+                    0,
+                )
+
+                if isinstance(first_revenue, str):
+                    first_revenue = (
+                        first_revenue
+                        .replace("₹", "")
+                        .replace(",", "")
+                        .strip()
+                    )
+
+                if isinstance(last_revenue, str):
+                    last_revenue = (
+                        last_revenue
+                        .replace("₹", "")
+                        .replace(",", "")
+                        .strip()
+                    )
 
                 return (
                     f"The revenue dataset contains "
                     f"{len(rows)} monthly observations, "
-                    f"from {first.get('month')} to "
-                    f"{last.get('month')}. "
+                    f"from {first_month} to {last_month}. "
                     f"Revenue was "
-                    f"₹{float(first.get('revenue', 0)):,.2f} "
-                    f"in {first.get('month')} and "
-                    f"₹{float(last.get('revenue', 0)):,.2f} "
-                    f"in {last.get('month')}."
+                    f"₹{float(first_revenue):,.2f} "
+                    f"in {first_month} and "
+                    f"₹{float(last_revenue):,.2f} "
+                    f"in {last_month}."
                 )
 
         # =========================================================
