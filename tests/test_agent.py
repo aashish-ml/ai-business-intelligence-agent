@@ -380,4 +380,50 @@ def test_agent_uses_memory_for_multi_step_category_follow_up():
     ) == 2
 
     assert "7.37%" in second_state.final_answer
-    assert "Beauty" in second_state.final_answer    
+    assert "Beauty" in second_state.final_answer   
+
+def test_agent_uses_memory_for_category_product_follow_up():
+    """Agent should use the remembered category for product analysis."""
+
+    agent = BusinessIntelligenceAgent()
+
+    first_state = agent.run(
+        "Why did revenue change this month?"
+    )
+
+    assert first_state.status == "completed"
+    assert len(agent.memory) == 1
+
+    second_state = agent.run(
+        "Which category contributed most to that change?"
+    )
+
+    assert second_state.status == "completed"
+    assert len(agent.memory) == 2
+    assert second_state.intent == "business_decision_analysis"
+
+    third_state = agent.run(
+        "Which product performed best in that category?"
+    )
+
+    assert third_state.status == "completed"
+    assert len(agent.memory) == 3
+
+    assert third_state.intent == "product_performance"
+
+    assert any(
+    observation["tool"] == "execute_sql"
+    for observation in third_state.observations
+    )
+
+    sql_observation = next(
+    observation
+    for observation in third_state.observations
+    if observation["tool"] == "execute_sql"
+)
+
+    assert "beauty" in (
+        sql_observation["result"]["query"].lower()
+    )
+
+    assert "Beauty" in third_state.final_answer     

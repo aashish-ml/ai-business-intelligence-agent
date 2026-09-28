@@ -776,47 +776,68 @@ class AnswerSynthesizer:
     # =============================================================
 
     @staticmethod
+    @staticmethod
     def _get_business_rows(
         evidence: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        """
+        Extract tabular business rows from verified evidence.
+
+        Supports both business-analysis results and read-only
+        SQL results.
+        """
 
         for item in evidence:
 
-            if item.get("source") != "business_analysis":
+            source = item.get("source")
+
+            if source not in (
+                "business_analysis",
+                "execute_sql",
+                "sql_query",
+            ):
                 continue
 
             data = item.get("data", {})
-            result = data.get("result", {})
 
-            # Some business-analysis metrics return:
+            if not isinstance(data, dict):
+                continue
+
+            result = data.get("result", data)
+
+            if not isinstance(result, dict):
+                continue
+
+            # -----------------------------------------------------
+            # Business-analysis format:
             #
             # {
-            #     "data": [...]
+            #     "result": {
+            #         "data": [...]
+            #     }
             # }
-            #
-            # while other metrics return:
-            #
-            # {
-            #     "status": "success",
-            #     ...
-            # }
-            #
-            # Support both formats.
+            # -----------------------------------------------------
 
             rows = result.get("data")
 
             if isinstance(rows, list):
                 return rows
 
-            if result.get("status") == "success":
+            # -----------------------------------------------------
+            # SQL format:
+            #
+            # {
+            #     "result": {
+            #         "status": "success",
+            #         "rows": [...]
+            #     }
+            # }
+            # -----------------------------------------------------
 
-                rows = result.get(
-                    "rows",
-                    [],
-                )
+            rows = result.get("rows")
 
-                if isinstance(rows, list):
-                    return rows
+            if isinstance(rows, list):
+                return rows
 
         return []
 

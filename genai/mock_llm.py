@@ -147,6 +147,98 @@ class MockLLMClient:
                 ],
             )
 
+        # ---------------------------------------------------------
+        # Memory-aware category -> product follow-up.
+        # ---------------------------------------------------------
+
+        product_follow_up_phrases = (
+            "which product",
+            "what product",
+            "best product",
+            "top product",
+            "highest revenue product",
+        )
+
+        is_product_follow_up = any(
+            phrase in q
+            for phrase in product_follow_up_phrases
+        )
+
+        refers_to_previous_category = (
+            "that category" in q
+            or "this category" in q
+            or "the category" in q
+        )
+
+        known_categories = (
+            "beauty",
+            "sports",
+            "fashion",
+            "home",
+            "electronics",
+        )
+
+        remembered_category = next(
+            (
+                category
+                for category in known_categories
+                if category in normalized_context
+            ),
+            None,
+        )
+
+        if (
+            is_product_follow_up
+            and refers_to_previous_category
+            and remembered_category
+        ):
+            category_name = remembered_category.title()
+
+            return AgentPlan(
+                intent="product_performance",
+                reasoning=(
+                    "The question asks for the best product "
+                    f"within the previously discussed "
+                    f"{category_name} category."
+                ),
+                tool_calls=[
+                    ToolCall(
+                        tool="execute_sql",
+                        arguments={
+                            "query": (
+                                "SELECT "
+                                "p.product_name, "
+                                "p.category, "
+                                "SUM(o.quantity) AS units_sold, "
+                                "ROUND("
+                                "SUM("
+                                "(o.quantity * o.unit_price)"
+                                " - o.discount_amount"
+                                "), 2"
+                                ") AS revenue "
+                                "FROM orders o "
+                                "JOIN products p "
+                                "ON o.product_id = p.product_id "
+                                "WHERE o.order_status = 'completed' "
+                                f"AND LOWER(p.category) = "
+                                f"'{category_name.lower()}' "
+                                "GROUP BY "
+                                "p.product_id, "
+                                "p.product_name, "
+                                "p.category "
+                                "ORDER BY revenue DESC "
+                                "LIMIT 1"
+                            )
+                        },
+                        purpose=(
+                            "Identify the highest-revenue product "
+                            f"within the remembered {category_name} "
+                            "category."
+                        ),
+                    )
+                ],
+            )
+        
         # =========================================================
         # Customer Risk + Policy Multi-Step Workflow
         # =========================================================
