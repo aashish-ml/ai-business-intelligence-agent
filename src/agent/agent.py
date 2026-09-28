@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -220,6 +221,137 @@ class BusinessIntelligenceAgent:
                 )
 
         return True, "Tool result passed validation."
+
+    def validate_answer(
+        self,
+        answer: str,
+        evidence: list[dict[str, Any]],
+    ) -> tuple[bool, str]:
+        """
+        Validate that a generated answer is non-empty and
+        numerically grounded in the available evidence.
+
+        This is a lightweight deterministic guardrail. It does
+        not attempt to judge business correctness or language
+        quality. Its purpose is to prevent unsupported numerical
+        claims from reaching the user.
+        """
+
+        if not answer or not answer.strip():
+            return False, "Answer is empty."
+
+        if not evidence:
+            return False, "Answer has no supporting evidence."
+
+        # ---------------------------------------------------------
+        # Collect numeric values from verified evidence.
+        # ---------------------------------------------------------
+
+        evidence_numbers: set[float] = set()
+
+        def collect_numbers(value: Any) -> None:
+            if isinstance(value, bool):
+                return
+
+            if isinstance(value, (int, float)):
+                evidence_numbers.add(round(float(value), 6))
+                return
+
+            if isinstance(value, dict):
+                for nested_value in value.values():
+                    collect_numbers(nested_value)
+                return
+
+            if isinstance(value, list):
+                for nested_value in value:
+                    collect_numbers(nested_value)
+
+        for item in evidence:
+            collect_numbers(item)
+
+        if not evidence_numbers:
+            return (
+                False,
+                "Evidence contains no numeric values "
+                "to support the answer.",
+            )
+
+        # ---------------------------------------------------------
+        # Extract numeric business claims.
+        #
+        # Ignore date components such as:
+        #   2025-11
+        #   2025-12
+        #
+        # These are temporal references, not business metrics.
+        # ---------------------------------------------------------
+
+        date_spans = re.findall(
+            r"\b\d{4}-\d{1,2}(?:-\d{1,2})?\b",
+            answer,
+        )
+
+        answer_without_dates = re.sub(
+            r"\b\d{4}-\d{1,2}(?:-\d{1,2})?\b",
+            "",
+            answer,
+        )
+
+        # Product identifiers such as "Product 49" are entity
+        # identifiers, not numerical business claims.
+        answer_without_dates = re.sub(
+            r"\bproduct\s+\d+\b",
+            "product",
+            answer_without_dates,
+            flags=re.IGNORECASE,
+        )
+
+        numeric_tokens = re.findall(
+            r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?",
+            answer_without_dates,
+        )
+
+        answer_numbers: list[float] = []
+
+        for token in numeric_tokens:
+
+            normalized = token.replace(",", "")
+
+            try:
+                answer_numbers.append(
+                    round(float(normalized), 6)
+                )
+            except ValueError:
+                continue
+
+        # ---------------------------------------------------------
+        # Every numeric claim must be present in the evidence.
+        # A small tolerance handles floating-point representation.
+        # ---------------------------------------------------------
+
+        tolerance = 0.01
+
+        for number in answer_numbers:
+
+            supported = any(
+                abs(number - evidence_number)
+                <= tolerance
+                or abs(
+                    (number / 100) - evidence_number
+                )
+                <= tolerance
+                for evidence_number in evidence_numbers
+            )
+
+            if not supported:
+                return (
+                    False,
+                    f"Unsupported numeric claim: {number:g}.",
+                )
+        return (
+            True,
+            "Answer passed evidence validation.",
+        )
 
     def execute_tool_with_recovery(
         self,
@@ -696,6 +828,42 @@ class BusinessIntelligenceAgent:
                     "answer": state.final_answer,
                 },
             )
+
+            # -----------------------------------------------------
+            # 5. Validate the generated answer against evidence.
+            # -----------------------------------------------------
+            answer_valid, validation_message = self.validate_answer(
+                state.final_answer,
+                state.evidence,
+            )
+
+            state.add_trace(
+                state.iteration,
+                "ANSWER_VALIDATED",
+                {
+                    "valid": answer_valid,
+                    "message": validation_message,
+                },
+            )
+
+            if not answer_valid:
+                state.status = "failed"
+                state.error = validation_message
+
+                state.finish()
+
+                state.add_trace(
+                    state.iteration,
+                    "ANSWER_VALIDATION_FAILED",
+                    {
+                        "error": validation_message,
+                        "total_duration_ms": (
+                            state.total_duration_ms
+                        ),
+                    },
+                )
+
+                return state
 
             # -----------------------------------------------------
             # 5. Persist the completed turn in conversation memory.

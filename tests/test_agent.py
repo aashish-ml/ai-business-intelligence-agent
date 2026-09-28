@@ -341,7 +341,7 @@ def test_agent_uses_memory_for_previous_month_follow_up():
     )
 
     assert "2025-11" in second_state.final_answer
-    assert "16,357,450.38" in second_state.final_answer    
+    assert "16,357,450.38" in second_state.final_answer
 
 def test_agent_uses_memory_for_multi_step_category_follow_up():
     """Memory should enable multi-step category follow-up reasoning."""
@@ -380,7 +380,7 @@ def test_agent_uses_memory_for_multi_step_category_follow_up():
     ) == 2
 
     assert "7.37%" in second_state.final_answer
-    assert "Beauty" in second_state.final_answer   
+    assert "Beauty" in second_state.final_answer
 
 def test_agent_uses_memory_for_category_product_follow_up():
     """Agent should use the remembered category for product analysis."""
@@ -426,4 +426,135 @@ def test_agent_uses_memory_for_category_product_follow_up():
         sql_observation["result"]["query"].lower()
     )
 
-    assert "Beauty" in third_state.final_answer     
+    assert "Beauty" in third_state.final_answer
+
+def test_answer_validation_accepts_grounded_answer():
+    """Grounded answers should pass evidence validation."""
+
+    agent = BusinessIntelligenceAgent()
+
+    answer = (
+        "Revenue increased by 7.37% from "
+        "â‚¹16,357,450.38 to â‚¹17,563,379.21."
+    )
+
+    evidence = [
+        {
+            "source": "business_analysis",
+            "data": {
+                "result": {
+                    "status": "success",
+                    "previous_revenue": 16357450.38,
+                    "current_revenue": 17563379.21,
+                    "percentage_change": 7.37,
+                }
+            },
+        }
+    ]
+
+    is_valid, message = agent.validate_answer(
+        answer,
+        evidence,
+    )
+
+    assert is_valid is True
+    assert message == "Answer passed evidence validation."
+
+
+def test_answer_validation_rejects_empty_answer():
+    """Empty answers should fail validation."""
+
+    agent = BusinessIntelligenceAgent()
+
+    is_valid, message = agent.validate_answer(
+        "",
+        [],
+    )
+
+    assert is_valid is False
+    assert message == "Answer is empty."
+
+
+def test_answer_validation_rejects_answer_without_evidence():
+    """Business answers without evidence should fail validation."""
+
+    agent = BusinessIntelligenceAgent()
+
+    is_valid, message = agent.validate_answer(
+        "Revenue increased by 25%.",
+        [],
+    )
+
+    assert is_valid is False
+    assert message == "Answer has no supporting evidence."
+
+
+def test_answer_validation_rejects_unsupported_numeric_claim():
+    """Unsupported numeric claims should be rejected."""
+
+    agent = BusinessIntelligenceAgent()
+
+    answer = (
+        "Revenue increased by 25% from "
+        "â‚¹16,357,450.38 to â‚¹17,563,379.21."
+    )
+
+    evidence = [
+        {
+            "source": "business_analysis",
+            "data": {
+                "result": {
+                    "status": "success",
+                    "previous_revenue": 16357450.38,
+                    "current_revenue": 17563379.21,
+                    "percentage_change": 7.37,
+                }
+            },
+        }
+    ]
+
+    is_valid, message = agent.validate_answer(
+        answer,
+        evidence,
+    )
+
+    assert is_valid is False
+    assert "25" in message
+
+def test_answer_validation_ignores_product_identifiers():
+    """Product IDs should not be treated as unsupported metrics."""
+
+    agent = BusinessIntelligenceAgent()
+
+    answer = (
+        "Beauty Product 49 is the highest-revenue product "
+        "in the analyzed set, generating "
+        "â‚¹5,117,826.56 from 123 units."
+    )
+
+    evidence = [
+        {
+            "source": "execute_sql",
+            "data": {
+                "result": {
+                    "status": "success",
+                    "rows": [
+                        {
+                            "product_name": "Beauty Product 49",
+                            "category": "Beauty",
+                            "revenue": 5117826.56,
+                            "units_sold": 123,
+                        }
+                    ],
+                }
+            },
+        }
+    ]
+
+    is_valid, message = agent.validate_answer(
+        answer,
+        evidence,
+    )
+
+    assert is_valid is True
+    assert message == "Answer passed evidence validation."
