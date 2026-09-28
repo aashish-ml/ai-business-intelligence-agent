@@ -13,7 +13,11 @@ class MockLLMClient:
     SQL analytics, and multi-step decision-support workflows.
     """
 
-    def create_plan(self, question: str) -> AgentPlan:
+    def create_plan(
+    self,
+    question: str,
+    context: str = "",
+) -> AgentPlan:
         """Create a deterministic execution plan from a user question."""
 
         if not question or not question.strip():
@@ -102,6 +106,54 @@ class MockLLMClient:
                 or "happened" in q
             )
         ):
+
+            # Multi-step business decision analysis.
+            if (
+                "revenue" in q
+                and (
+                    "category" in q
+                    or "which category" in q
+                    or "contributed most" in q
+                    or "contribution" in q
+                )
+                and (
+                    "why" in q
+                    or "change" in q
+                    or "changed" in q
+                    or "decrease" in q
+                    or "increase" in q
+                )
+            ):
+                return AgentPlan(
+                    intent="business_decision_analysis",
+                    reasoning=(
+                        "The question requires multiple analytical steps: "
+                        "first determine the revenue change, then identify "
+                        "the category contributing the most revenue."
+                    ),
+                    tool_calls=[
+                        ToolCall(
+                            tool="business_analysis",
+                            arguments={
+                                "metric": "revenue_change"
+                            },
+                            purpose=(
+                                "Determine the current revenue change "
+                                "and quantify the month-over-month movement."
+                            ),
+                        ),
+                        ToolCall(
+                            tool="business_analysis",
+                            arguments={
+                                "metric": "category_performance"
+                            },
+                            purpose=(
+                                "Identify category-level revenue performance "
+                                "and determine the highest contributing category."
+                            ),
+                        ),
+                    ],
+                )
             return AgentPlan(
                 intent="business_revenue_analysis",
                 reasoning=(

@@ -3,12 +3,14 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from genai.mock_llm import MockLLMClient
+from genai.llm_client import create_llm_client
+from genai.plan_validator import validate_plan
 from genai.synthesis import AnswerSynthesizer
 
 from src.agent.planner import BusinessPlanner
 from src.agent.router import ToolRouter
 from src.agent.state import AgentState
+from src.agent.memory import AgentMemory
 
 from src.tools.analysis_tool import group_and_aggregate
 from src.tools.business_analysis_tool import analyze_business_metric
@@ -22,12 +24,14 @@ class BusinessIntelligenceAgent:
     """Production-oriented business intelligence agent."""
 
     MAX_ITERATIONS = 5
+    MAX_TOOL_RETRIES = 1
 
     def __init__(self) -> None:
         self.router = ToolRouter()
         self.planner = BusinessPlanner()
-        self.llm = MockLLMClient()
+        self.llm = create_llm_client()
         self.synthesizer = AnswerSynthesizer()
+        self.memory = AgentMemory(max_turns=10)
 
         self.ml_tool = MLModelTool()
         self.rag_tool = RAGTool()
@@ -109,6 +113,182 @@ class BusinessIntelligenceAgent:
             user_question=question.strip()
         )
 
+    def validate_tool_result(
+        self,
+        tool_name: str,
+        result: Any,
+    ) -> tuple[bool, str]:
+        """
+        Validate the structural integrity of a tool result.
+
+        This validation does not judge whether the business answer
+        is correct. It only verifies that the tool returned a
+        usable result that the agent can safely process.
+        """
+
+        if result is None:
+            return False, "Tool returned no result."
+
+        if not isinstance(result, dict):
+            return True, "Tool returned a non-dictionary result."
+
+        # Explicit tool failure.
+        if result.get("success") is False:
+            error = result.get(
+                "error",
+                "Tool reported an unsuccessful execution.",
+            )
+
+            return False, str(error)
+
+        # SQL-style results must contain rows.
+        if tool_name in {
+            "execute_sql",
+            "sql_query",
+        }:
+            if "rows" not in result:
+                return (
+                    False,
+                    "SQL tool result is missing the 'rows' field.",
+                )
+
+            if not isinstance(result["rows"], list):
+                return (
+                    False,
+                    "SQL tool 'rows' field must be a list.",
+                )
+
+        # Business-analysis results must contain either
+        # structured data or a successful metric result.
+        if tool_name == "business_analysis":
+
+            if "data" in result:
+                if not isinstance(result["data"], list):
+                    return (
+                        False,
+                        "Business analysis 'data' field "
+                        "must be a list.",
+                    )
+
+            elif result.get("status") == "success":
+                pass
+
+            else:
+                return (
+                    False,
+                    "Business analysis result does not "
+                    "contain usable structured data.",
+                )
+
+        # RAG results must contain a results list when successful.
+        if tool_name == "rag_search":
+
+            if "results" not in result:
+                return (
+                    False,
+                    "RAG result is missing the 'results' field.",
+                )
+
+            if not isinstance(result["results"], list):
+                return (
+                    False,
+                    "RAG 'results' field must be a list.",
+                )
+
+        # Customer-risk predictions must contain the core
+        # prediction fields when successful.
+        if tool_name == "customer_risk_prediction":
+
+            required_fields = {
+                "customer_id",
+                "risk_probability",
+                "risk_level",
+            }
+
+            missing = [
+                field
+                for field in required_fields
+                if field not in result
+            ]
+
+            if missing:
+                return (
+                    False,
+                    "Customer risk result is missing fields: "
+                    + ", ".join(sorted(missing))
+                    + ".",
+                )
+
+        return True, "Tool result passed validation."
+
+    def execute_tool_with_recovery(
+        self,
+        state: AgentState,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> Any:
+        """
+        Execute a tool with one controlled recovery retry.
+
+        The first execution is attempted normally. If the tool
+        fails or returns an invalid result, the agent retries the
+        same tool once. A second failure is propagated to the
+        main execution handler.
+        """
+
+        attempt = 0
+
+        while attempt <= self.MAX_TOOL_RETRIES:
+
+            try:
+                if attempt > 0:
+                    state.add_trace(
+                        state.iteration + 1,
+                        "TOOL_RECOVERY_RETRY",
+                        {
+                            "tool": tool_name,
+                            "attempt": attempt + 1,
+                            "max_retries": self.MAX_TOOL_RETRIES,
+                        },
+                    )
+
+                return self.execute_tool(
+                    state,
+                    tool_name,
+                    arguments,
+                )
+
+            except Exception as exc:
+
+                if attempt >= self.MAX_TOOL_RETRIES:
+                    state.add_trace(
+                        state.iteration + 1,
+                        "TOOL_RECOVERY_EXHAUSTED",
+                        {
+                            "tool": tool_name,
+                            "attempts": attempt + 1,
+                            "error": str(exc),
+                        },
+                    )
+
+                    raise
+
+                state.add_trace(
+                    state.iteration + 1,
+                    "TOOL_RECOVERY_TRIGGERED",
+                    {
+                        "tool": tool_name,
+                        "attempt": attempt + 1,
+                        "error": str(exc),
+                    },
+                )
+
+                attempt += 1
+
+        raise RuntimeError(
+            f"Tool recovery failed unexpectedly for '{tool_name}'."
+        )
+    
     def execute_tool(
         self,
         state: AgentState,
@@ -153,7 +333,6 @@ class BusinessIntelligenceAgent:
                 tool_name,
                 arguments,
             )
-
         except Exception as exc:
             duration_ms = round(
                 (time.perf_counter() - tool_start) * 1000,
@@ -178,6 +357,40 @@ class BusinessIntelligenceAgent:
         )
 
         state.iteration += 1
+
+        # ---------------------------------------------------------
+        # Validate the tool result before recording it as usable
+        # agent evidence.
+        # ---------------------------------------------------------
+        is_valid, validation_message = self.validate_tool_result(
+            tool_name,
+            result,
+        )
+
+        state.add_trace(
+            state.iteration,
+            "TOOL_RESULT_VALIDATED",
+            {
+                "tool": tool_name,
+                "valid": is_valid,
+                "message": validation_message,
+            },
+        )
+
+        if not is_valid:
+            state.add_trace(
+                state.iteration,
+                "TOOL_RESULT_INVALID",
+                {
+                    "tool": tool_name,
+                    "error": validation_message,
+                },
+            )
+
+            raise RuntimeError(
+                f"Invalid result from tool '{tool_name}': "
+                f"{validation_message}"
+            )
 
         state.add_observation(
             tool_name,
@@ -225,29 +438,66 @@ class BusinessIntelligenceAgent:
 
         try:
             # -----------------------------------------------------
-            # 1. Generate structured plan.
+            # 1. Build conversation memory context.
             # -----------------------------------------------------
-            plan = self.llm.create_plan(question)
+            conversation_context = self.memory.get_context()
 
-            state.intent = plan.intent
-
-            state.plan = [
+            state.add_trace(
+                0,
+                "MEMORY_CONTEXT_RETRIEVED",
                 {
-                    "tool": call.tool,
-                    "arguments": call.arguments,
-                    "purpose": call.purpose,
-                }
-                for call in plan.tool_calls
-            ]
+                    "memory_context_used": bool(conversation_context),
+                    "memory_turns": len(self.memory),
+                },
+            )
 
+            # -----------------------------------------------------
+            # 2. Generate structured plan using memory context.
+            # -----------------------------------------------------
+            plan = self.llm.create_plan(
+                question,
+                context=conversation_context,
+            )
+
+            # Record the plan produced by the planning layer.
             state.add_trace(
                 0,
                 "PLAN_CREATED",
                 {
-                    "intent": state.intent,
-                    "plan": state.plan,
+                    "intent": plan.intent,
+                    "memory_context_used": bool(
+                        conversation_context
+                    ),
+                    "memory_turns": len(self.memory),
+                    "plan": [
+                        {
+                            "tool": tool_call.tool,
+                            "arguments": tool_call.arguments,
+                            "purpose": tool_call.purpose,
+                        }
+                        for tool_call in plan.tool_calls
+                    ],
                 },
             )
+
+            # Validate the structured plan before any tool execution.
+            plan = validate_plan(plan)
+
+            state.add_trace(
+                0,
+                "PLAN_VALIDATED",
+                {
+                    "intent": plan.intent,
+                    "tool_count": len(plan.tool_calls),
+                    "tools": [
+                        tool_call.tool
+                        for tool_call in plan.tool_calls
+                    ],
+                    "validation_status": "passed",
+                },
+            )
+
+            state.intent = plan.intent
 
             # -----------------------------------------------------
             # 2. Execute planned tools.
@@ -277,7 +527,7 @@ class BusinessIntelligenceAgent:
 
                     return state
 
-                result = self.execute_tool(
+                result = self.execute_tool_with_recovery(
                     state,
                     tool_call.tool,
                     tool_call.arguments,
@@ -306,7 +556,10 @@ class BusinessIntelligenceAgent:
                 # Multi-step revenue analysis.
                 # -------------------------------------------------
                 if (
-                    state.intent == "business_analysis"
+                    state.intent in {
+                        "business_analysis",
+                        "business_revenue_analysis",
+                    }
                     and tool_call.tool == "sql_query"
                 ):
                     rows = result.get("rows", [])
@@ -323,14 +576,14 @@ class BusinessIntelligenceAgent:
                             current["revenue"]
                         )
 
-                        percentage_result = self.execute_tool(
-                            state,
-                            "percentage_change",
-                            {
-                                "old_value": previous_revenue,
-                                "new_value": current_revenue,
-                            },
-                        )
+                        percentage_result = self.execute_tool_with_recovery(
+                                            state,
+                                            "percentage_change",
+                                            {
+                                                "old_value": previous_revenue,
+                                                "new_value": current_revenue,
+                                            },
+                                        )
 
                         state.add_evidence(
                             "percentage_change",
@@ -371,14 +624,14 @@ class BusinessIntelligenceAgent:
                             f"{risk_level}-risk customer?"
                         )
 
-                        rag_result = self.execute_tool(
-                            state,
-                            "rag_search",
-                            {
-                                "query": rag_query,
-                                "top_k": 5,
-                            },
-                        )
+                        rag_result = self.execute_tool_with_recovery(
+                                        state,
+                                        "rag_search",
+                                        {
+                                            "query": rag_query,
+                                            "top_k": 5,
+                                        },
+                                    )
 
                         state.add_evidence(
                             "rag_search",
@@ -445,7 +698,35 @@ class BusinessIntelligenceAgent:
             )
 
             # -----------------------------------------------------
-            # 5. Mark successful execution.
+            # 5. Persist the completed turn in conversation memory.
+            # -----------------------------------------------------
+            self.memory.add_turn(
+                question=question,
+                answer=state.final_answer,
+                intent=state.intent,
+                evidence=state.evidence,
+            )
+
+            state.add_trace(
+                state.iteration,
+                "MEMORY_TURN_SAVED",
+                {
+                    "memory_turns": len(self.memory),
+                    "intent": state.intent,
+                },
+            )
+
+            state.add_trace(
+            state.iteration,
+            "MEMORY_UPDATED",
+            {
+                "memory_turns": len(self.memory),
+                "intent": state.intent,
+            },
+)
+            
+            # -----------------------------------------------------
+            # 6. Mark successful execution.
             # -----------------------------------------------------
             state.status = "completed"
 

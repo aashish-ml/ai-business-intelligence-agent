@@ -25,36 +25,230 @@ class AnswerSynthesizer:
             )
 
         # =========================================================
-        # 1. Revenue Change
+        # 1. Multi-Step Business Decision Analysis
+        # =========================================================
+
+        if intent == "business_decision_analysis":
+
+            revenue_result = None
+            category_rows: list[dict[str, Any]] = []
+
+            for item in evidence:
+
+                if item.get("source") != "business_analysis":
+                    continue
+
+                data = item.get("data", {})
+                result = data.get("result", {})
+
+                if not isinstance(result, dict):
+                    continue
+
+                # -------------------------------------------------
+                # Revenue-change evidence
+                # -------------------------------------------------
+
+                if (
+                    result.get("status") == "success"
+                    and result.get("previous_revenue") is not None
+                    and result.get("current_revenue") is not None
+                    and result.get("percentage_change") is not None
+                ):
+                    revenue_result = result
+                    continue
+
+                # -------------------------------------------------
+                # Category-performance evidence
+                # -------------------------------------------------
+
+                rows = result.get("data")
+
+                if isinstance(rows, list) and rows:
+                    category_rows = rows
+
+            answer_parts: list[str] = []
+
+            # -----------------------------------------------------
+            # Step 1: Revenue change
+            # -----------------------------------------------------
+
+            if revenue_result is not None:
+
+                previous_month = revenue_result.get(
+                    "previous_month"
+                )
+                current_month = revenue_result.get(
+                    "current_month"
+                )
+                previous_revenue = revenue_result.get(
+                    "previous_revenue"
+                )
+                current_revenue = revenue_result.get(
+                    "current_revenue"
+                )
+                absolute_change = revenue_result.get(
+                    "absolute_change"
+                )
+                percentage_change = revenue_result.get(
+                    "percentage_change"
+                )
+                direction = revenue_result.get(
+                    "direction"
+                )
+
+                if (
+                    previous_revenue is not None
+                    and current_revenue is not None
+                    and percentage_change is not None
+                ):
+
+                    direction_text = {
+                        "increased": "increased",
+                        "decreased": "decreased",
+                        "unchanged": "remained unchanged",
+                    }.get(
+                        direction,
+                        "changed",
+                    )
+
+                    revenue_sentence = (
+                        f"Revenue {direction_text} by "
+                        f"{abs(float(percentage_change)):.2f}% "
+                        f"from "
+                        f"₹{float(previous_revenue):,.2f} "
+                        f"in {previous_month} to "
+                        f"₹{float(current_revenue):,.2f} "
+                        f"in {current_month}"
+                    )
+
+                    if absolute_change is not None:
+                        revenue_sentence += (
+                            f", a change of "
+                            f"₹{abs(float(absolute_change)):,.2f}"
+                        )
+
+                    revenue_sentence += "."
+
+                    answer_parts.append(revenue_sentence)
+
+            # -----------------------------------------------------
+            # Step 2: Category contribution
+            # -----------------------------------------------------
+
+            if category_rows:
+
+                top_category = max(
+                    category_rows,
+                    key=lambda row: float(
+                        row.get("revenue", 0)
+                    ),
+                )
+
+                category_name = top_category.get(
+                    "category",
+                    "Unknown category",
+                )
+
+                category_revenue = float(
+                    top_category.get("revenue", 0)
+                )
+
+                units_sold = top_category.get(
+                    "units_sold"
+                )
+
+                category_sentence = (
+                    f"The highest-revenue category was "
+                    f"{category_name}, generating "
+                    f"₹{category_revenue:,.2f}"
+                )
+
+                if units_sold is not None:
+                    category_sentence += (
+                        f" from "
+                        f"{int(units_sold):,} units"
+                    )
+
+                category_sentence += "."
+
+                answer_parts.append(category_sentence)
+
+            # -----------------------------------------------------
+            # Step 3: Management investigation guidance
+            # -----------------------------------------------------
+
+            if answer_parts:
+
+                answer_parts.append(
+                    "Management should investigate the "
+                    "category-level drivers behind the revenue "
+                    "movement and compare them with the "
+                    "previous period."
+                )
+
+                return " ".join(answer_parts)
+
+            return (
+                "The multi-step business analysis completed, "
+                "but there was not enough structured evidence "
+                "to generate a detailed business summary."
+            )
+
+        # =========================================================
+        # 2. Revenue Change
         # =========================================================
 
         if intent == "business_revenue_analysis":
 
             for item in evidence:
+
                 if item.get("source") != "business_analysis":
                     continue
 
-                result = item.get("data", {}).get("result", {})
+                result = item.get("data", {}).get(
+                    "result",
+                    {},
+                )
 
                 if result.get("status") != "success":
                     continue
 
-                previous_month = result.get("previous_month")
-                current_month = result.get("current_month")
-                previous_revenue = result.get("previous_revenue")
-                current_revenue = result.get("current_revenue")
-                absolute_change = result.get("absolute_change")
-                percentage_change = result.get("percentage_change")
-                direction = result.get("direction")
+                previous_month = result.get(
+                    "previous_month"
+                )
+                current_month = result.get(
+                    "current_month"
+                )
+                previous_revenue = result.get(
+                    "previous_revenue"
+                )
+                current_revenue = result.get(
+                    "current_revenue"
+                )
+                absolute_change = result.get(
+                    "absolute_change"
+                )
+                percentage_change = result.get(
+                    "percentage_change"
+                )
+                direction = result.get(
+                    "direction"
+                )
 
-                if previous_revenue is None or current_revenue is None:
+                if (
+                    previous_revenue is None
+                    or current_revenue is None
+                ):
                     continue
 
                 direction_text = {
                     "increased": "increased",
                     "decreased": "decreased",
                     "unchanged": "remained unchanged",
-                }.get(direction, "changed")
+                }.get(
+                    direction,
+                    "changed",
+                )
 
                 return (
                     f"Revenue {direction_text} by "
@@ -68,7 +262,7 @@ class AnswerSynthesizer:
                 )
 
         # =========================================================
-        # 2. Revenue Trend
+        # 3. Revenue Trend
         # =========================================================
 
         if intent == "business_revenue_trend":
@@ -76,13 +270,15 @@ class AnswerSynthesizer:
             rows = self._get_business_rows(evidence)
 
             if rows:
+
                 first = rows[0]
                 last = rows[-1]
 
                 return (
-                    f"The revenue dataset contains {len(rows)} "
-                    f"monthly observations, from "
-                    f"{first.get('month')} to {last.get('month')}. "
+                    f"The revenue dataset contains "
+                    f"{len(rows)} monthly observations, "
+                    f"from {first.get('month')} to "
+                    f"{last.get('month')}. "
                     f"Revenue was "
                     f"₹{float(first.get('revenue', 0)):,.2f} "
                     f"in {first.get('month')} and "
@@ -91,7 +287,7 @@ class AnswerSynthesizer:
                 )
 
         # =========================================================
-        # 3. Category Performance
+        # 4. Category Performance
         # =========================================================
 
         if intent == "category_performance":
@@ -99,6 +295,7 @@ class AnswerSynthesizer:
             rows = self._get_business_rows(evidence)
 
             if rows:
+
                 top = rows[0]
 
                 return (
@@ -106,11 +303,12 @@ class AnswerSynthesizer:
                     f"generated the highest revenue among the "
                     f"analyzed categories, with "
                     f"₹{float(top.get('revenue', 0)):,.2f} "
-                    f"from {int(top.get('units_sold', 0)):,} units."
+                    f"from "
+                    f"{int(top.get('units_sold', 0)):,} units."
                 )
 
         # =========================================================
-        # 4. Product Performance
+        # 5. Product Performance
         # =========================================================
 
         if intent == "product_performance":
@@ -118,6 +316,7 @@ class AnswerSynthesizer:
             rows = self._get_business_rows(evidence)
 
             if rows:
+
                 top = rows[0]
 
                 return (
@@ -125,11 +324,12 @@ class AnswerSynthesizer:
                     f"is the highest-revenue product in the "
                     f"analyzed set, generating "
                     f"₹{float(top.get('revenue', 0)):,.2f} "
-                    f"from {int(top.get('units_sold', 0)):,} units."
+                    f"from "
+                    f"{int(top.get('units_sold', 0)):,} units."
                 )
 
         # =========================================================
-        # 5. Segment Performance
+        # 6. Segment Performance
         # =========================================================
 
         if intent == "segment_performance":
@@ -137,19 +337,21 @@ class AnswerSynthesizer:
             rows = self._get_business_rows(evidence)
 
             if rows:
+
                 top = rows[0]
 
                 return (
                     f"{top.get('segment_name', 'Unknown segment')} "
-                    f"is the highest-revenue customer segment in "
-                    f"the analyzed data, generating "
+                    f"is the highest-revenue customer segment "
+                    f"in the analyzed data, generating "
                     f"₹{float(top.get('revenue', 0)):,.2f} "
-                    f"across {int(top.get('customers', 0)):,} "
+                    f"across "
+                    f"{int(top.get('customers', 0)):,} "
                     f"customers."
                 )
 
         # =========================================================
-        # 6. Order Status
+        # 7. Order Status
         # =========================================================
 
         if intent == "order_status_analysis":
@@ -157,9 +359,11 @@ class AnswerSynthesizer:
             rows = self._get_business_rows(evidence)
 
             if rows:
+
                 parts = []
 
                 for row in rows:
+
                     parts.append(
                         f"{row.get('status', 'unknown')}: "
                         f"{int(row.get('order_count', 0)):,}"
@@ -172,34 +376,48 @@ class AnswerSynthesizer:
                 )
 
         # =========================================================
-        # 7. Customer Risk Prediction
+        # 8. Customer Risk Prediction
         # =========================================================
 
         if intent == "customer_risk_prediction":
 
             for item in evidence:
-                if item.get("source") != "customer_risk_prediction":
+
+                if (
+                    item.get("source")
+                    != "customer_risk_prediction"
+                ):
                     continue
 
                 data = item.get("data", {})
                 result = data.get("result", data)
 
                 if not result.get("success"):
+
                     return (
                         "Customer risk prediction could not "
                         "be completed."
                     )
 
-                customer_id = result.get("customer_id")
-                probability = result.get("risk_probability")
-                risk_level = result.get("risk_level")
-                threshold = result.get("decision_threshold")
+                customer_id = result.get(
+                    "customer_id"
+                )
+                probability = result.get(
+                    "risk_probability"
+                )
+                risk_level = result.get(
+                    "risk_level"
+                )
+                threshold = result.get(
+                    "decision_threshold"
+                )
 
                 if (
                     customer_id is None
                     or probability is None
                     or risk_level is None
                 ):
+
                     return (
                         "Customer risk prediction completed, "
                         "but the result was incomplete."
@@ -213,15 +431,15 @@ class AnswerSynthesizer:
 
                 return (
                     f"Customer {customer_id} is currently "
-                    f"classified as {risk_level} risk, with a "
-                    f"predicted risk probability of "
+                    f"classified as {risk_level} risk, "
+                    f"with a predicted risk probability of "
                     f"{probability * 100:.2f}%. "
                     f"The model decision threshold is "
                     f"{threshold_text}."
                 )
 
         # =========================================================
-        # 8. Customer Risk + Policy
+        # 9. Customer Risk + Policy
         # =========================================================
 
         if intent == "customer_risk_policy":
@@ -230,6 +448,7 @@ class AnswerSynthesizer:
             rag_result = None
 
             for item in evidence:
+
                 source = item.get("source")
                 data = item.get("data", {})
                 result = data.get("result", data)
@@ -241,25 +460,37 @@ class AnswerSynthesizer:
                     rag_result = result
 
             if not risk_result:
+
                 return (
                     "Customer risk prediction could not "
                     "be completed."
                 )
 
             if not rag_result:
+
                 return (
                     "Customer risk was predicted, but the "
                     "relevant business policy could not "
                     "be retrieved."
                 )
 
-            customer_id = risk_result.get("customer_id")
-            probability = risk_result.get("risk_probability")
-            risk_level = risk_result.get("risk_level")
+            customer_id = risk_result.get(
+                "customer_id"
+            )
+            probability = risk_result.get(
+                "risk_probability"
+            )
+            risk_level = risk_result.get(
+                "risk_level"
+            )
 
-            results = rag_result.get("results", [])
+            results = rag_result.get(
+                "results",
+                [],
+            )
 
             if not results:
+
                 return (
                     f"Customer {customer_id} has a predicted "
                     f"risk probability of "
@@ -275,10 +506,12 @@ class AnswerSynthesizer:
             policy = None
 
             for candidate in results:
+
                 if (
                     candidate.get("section", "").lower()
                     == expected_section.lower()
                 ):
+
                     policy = candidate
                     break
 
@@ -286,26 +519,33 @@ class AnswerSynthesizer:
                 policy = results[0]
 
             return (
-                f"Customer {customer_id} has a predicted risk "
-                f"probability of {probability * 100:.2f}%, "
+                f"Customer {customer_id} has a predicted "
+                f"risk probability of "
+                f"{probability * 100:.2f}%, "
                 f"which is classified as {risk_level} risk. "
-                f"According to {policy.get('filename', 'business policy')} "
+                f"According to "
+                f"{policy.get('filename', 'business policy')} "
                 f"({policy.get('section', 'relevant section')}), "
                 f"the recommended approach is: "
                 f"{policy.get('text', '')}"
             )
 
         # =========================================================
-        # 9. Product Margin Analysis
+        # 10. Product Margin Analysis
         # =========================================================
 
         if intent == "product_analysis":
 
             for item in evidence:
+
                 if item.get("source") != "sql_query":
                     continue
 
-                result = item.get("data", {}).get("result", {})
+                result = item.get("data", {}).get(
+                    "result",
+                    {},
+                )
+
                 rows = result.get("rows", [])
 
                 if not rows:
@@ -314,9 +554,16 @@ class AnswerSynthesizer:
                 metrics = []
 
                 for row in rows:
-                    revenue = float(row.get("revenue", 0))
+
+                    revenue = float(
+                        row.get("revenue", 0)
+                    )
+
                     profit = float(
-                        row.get("estimated_profit", 0)
+                        row.get(
+                            "estimated_profit",
+                            0,
+                        )
                     )
 
                     margin = (
@@ -340,7 +587,10 @@ class AnswerSynthesizer:
                     )
 
                 average_margin = (
-                    sum(x["margin"] for x in metrics)
+                    sum(
+                        x["margin"]
+                        for x in metrics
+                    )
                     / len(metrics)
                 )
 
@@ -350,23 +600,24 @@ class AnswerSynthesizer:
                 )
 
                 return (
-                    f"The most margin-challenged product in the "
-                    f"analyzed set is "
+                    f"The most margin-challenged product "
+                    f"in the analyzed set is "
                     f"{lowest['product_name']} "
                     f"({lowest['category']}). "
                     f"It has an estimated profit margin of "
-                    f"{lowest['margin']:.2f}%, compared with an "
-                    f"analyzed-product average of "
+                    f"{lowest['margin']:.2f}%, compared with "
+                    f"an analyzed-product average of "
                     f"{average_margin:.2f}%."
                 )
 
-        # =========================================================
-        # 10. Knowledge / RAG Search
+            # =========================================================
+        # 11. Knowledge / RAG Search
         # =========================================================
 
         if intent == "knowledge_search":
 
             for item in evidence:
+
                 if item.get("source") != "rag_search":
                     continue
 
@@ -374,13 +625,19 @@ class AnswerSynthesizer:
                 result = data.get("result", data)
 
                 if not result.get("success"):
+
                     return (
-                        "Knowledge search could not be completed."
+                        "Knowledge search could not be "
+                        "completed."
                     )
 
-                results = result.get("results", [])
+                results = result.get(
+                    "results",
+                    [],
+                )
 
                 if not results:
+
                     return (
                         "No relevant business policy or "
                         "knowledge was found."
@@ -398,14 +655,19 @@ class AnswerSynthesizer:
                 )
 
         # =========================================================
-        # 11. Generic SQL Result
+        # 12. Generic SQL Result
         # =========================================================
 
         for item in evidence:
+
             if item.get("source") != "sql_query":
                 continue
 
-            result = item.get("data", {}).get("result", {})
+            result = item.get("data", {}).get(
+                "result",
+                {},
+            )
+
             rows = result.get("rows", [])
 
             if rows:
@@ -434,11 +696,13 @@ class AnswerSynthesizer:
             result = data.get("result", {})
 
             # Some business-analysis metrics return:
+            #
             # {
             #     "data": [...]
             # }
             #
             # while other metrics return:
+            #
             # {
             #     "status": "success",
             #     ...
@@ -452,7 +716,11 @@ class AnswerSynthesizer:
                 return rows
 
             if result.get("status") == "success":
-                rows = result.get("rows", [])
+
+                rows = result.get(
+                    "rows",
+                    [],
+                )
 
                 if isinstance(rows, list):
                     return rows
