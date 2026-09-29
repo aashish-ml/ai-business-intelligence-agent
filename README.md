@@ -530,6 +530,60 @@ Decision Support
 
 The architecture is modular so individual components can be replaced or extended independently.
 
+## 📸 Application Screenshots
+
+### AI Business Analyst
+
+The AI Business Analyst allows users to ask natural-language business questions and receive evidence-grounded answers using SQL analytics, data analysis, machine learning, and business knowledge.
+
+![AI Business Analysis](docs/screenshots/agent-business-analysis.png)
+
+### Evidence-Grounded Analysis
+
+The agent displays the supporting evidence, execution status, intent, iteration count, and response latency for each analysis.
+
+![Evidence Validation](docs/screenshots/agent-evidence-validation.png)
+
+### Agent Execution Trace
+
+The execution trace provides visibility into the agent workflow, including memory retrieval, plan creation, plan validation, tool execution, evidence collection, answer generation, and validation.
+
+![Agent Execution Trace](docs/screenshots/agent-execution-trace.png)
+
+![Agent Execution Trace Details](docs/screenshots/agent-execution-trace-details.png)
+
+### Business Intelligence Dashboard
+
+The executive dashboard provides an overview of revenue, orders, customers, return rate, cancellation rate, and monthly revenue trends.
+
+![Business Intelligence Dashboard](docs/screenshots/business-dashboard.png)
+
+### Revenue, Categories & Order Status
+
+Revenue by category and order-status distribution provide a high-level view of business performance and operational health.
+
+![Revenue by Category and Order Status](docs/screenshots/revenue-category-order-status.png)
+
+### Top Products
+
+The dashboard highlights the top products ranked by revenue.
+
+![Top Products by Revenue](docs/screenshots/top-products.png)
+
+### Customer Segment Performance
+
+Customer segment analysis shows revenue contribution across Premium, Enterprise, Loyal, SMB, Standard, and At-Risk segments.
+
+![Customer Segment Performance](docs/screenshots/customer-segment-performance.png)
+
+### Detailed Business Data
+
+Detailed business data tables provide product-level metrics including category, units sold, and revenue.
+
+![Detailed Business Data](docs/screenshots/detailed-business-data.png)
+
+---
+
 ## 🚧 Future Improvements
 
 . Persistent Redis/PostgreSQL conversation memory
