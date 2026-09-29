@@ -404,7 +404,6 @@ Returns:
 
 Clone the repository
 
-git clone <YOUR_GITHUB_REPOSITORY_URL>
 cd ai-business-intelligence-agent
 
 ## Create virtual environment
