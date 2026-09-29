@@ -307,9 +307,9 @@ class BusinessIntelligenceAgent:
         )
 
         numeric_tokens = re.findall(
-            r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?",
-            answer_without_dates,
-        )
+        r"-?\d[\d,]*(?:\.\d+)?",
+        answer_without_dates,
+    )
 
         answer_numbers: list[float] = []
 
@@ -348,6 +348,7 @@ class BusinessIntelligenceAgent:
                     False,
                     f"Unsupported numeric claim: {number:g}.",
                 )
+
         return (
             True,
             "Answer passed evidence validation.",
@@ -420,7 +421,7 @@ class BusinessIntelligenceAgent:
         raise RuntimeError(
             f"Tool recovery failed unexpectedly for '{tool_name}'."
         )
-    
+
     def execute_tool(
         self,
         state: AgentState,
@@ -892,7 +893,7 @@ class BusinessIntelligenceAgent:
                 "intent": state.intent,
             },
 )
-            
+
             # -----------------------------------------------------
             # 6. Mark successful execution.
             # -----------------------------------------------------

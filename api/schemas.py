@@ -20,6 +20,12 @@ class AgentQueryRequest(BaseModel):
         description="Natural-language business question.",
     )
 
+    session_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional conversation session identifier.",
+    )
+
 
 class AgentTraceEvent(BaseModel):
     """Single agent execution trace event."""

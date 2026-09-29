@@ -10,7 +10,7 @@ from api.schemas import (
     AgentQueryResponse,
     AgentTraceEvent,
 )
-from src.agent.agent import BusinessIntelligenceAgent
+from src.agent.session_memory import session_store
 
 
 router = APIRouter(
@@ -29,9 +29,17 @@ def query_agent(
     """
     Execute a natural-language business question
     through the Business Intelligence Agent.
+
+    If a session_id is provided, the same agent instance is reused
+    so conversation memory is preserved across requests.
     """
 
-    agent = BusinessIntelligenceAgent()
+    if request.session_id:
+        agent = session_store.get_agent(request.session_id)
+    else:
+        agent = session_store.get_agent(
+            f"request-{id(request)}"
+        )
 
     state = agent.run(
         request.question
